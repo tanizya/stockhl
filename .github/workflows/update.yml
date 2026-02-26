@@ -28,16 +28,25 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Restore data cache (#6)
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: data_cache.json
+          key: stock-data-cache-${{ github.run_id }}
+          restore-keys: |
+            stock-data-cache-
+
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Fetch data and build HTML
+      - name: Fetch data and build site
         run: python fetch_and_build.py
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment
