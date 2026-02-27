@@ -36,6 +36,9 @@
     justify-content: center;
     margin-bottom: 4px;
     border-bottom: 1px solid #21262d;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
   .tab {
     position: relative;
@@ -142,6 +145,12 @@
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
     body { padding: 2px; }
+    .tab {
+      padding: 4px 6px;
+      font-size: 0.6rem;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
   }
 </style>
 </head>
