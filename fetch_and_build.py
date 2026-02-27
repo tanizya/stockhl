@@ -824,6 +824,13 @@ def main():
     with open(html_path, "w", encoding="utf-8") as f:
         f.write(html)
 
+    # data.json for iOS app
+    data_json = {"tabs": TABS, "data": all_data, "timestamp": timestamp}
+    data_json_path = os.path.join(SITE_DIR, "data.json")
+    with open(data_json_path, "w", encoding="utf-8") as f:
+        json.dump(data_json, f, separators=(",", ":"))
+    print(f"  data.json written ({os.path.getsize(data_json_path)} bytes)")
+
     # PWA assets (#10)
     write_manifest(SITE_DIR)
     write_service_worker(SITE_DIR, timestamp.replace(" ", "-").replace(":", ""))
