@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import yfinance as yf
+from finvizfinance.screener.overview import Overview
 
 # Load .env file if present (for local runs)
 _env_path = Path(__file__).resolve().parent / ".env"
@@ -39,7 +40,7 @@ if _env_path.exists():
 
 TABS = [
     {"id": "market_cap", "label": "Market Cap Top 10", "predefined": None},
-    {"id": "day_gainers", "label": "Top Gainers", "predefined": "day_gainers"},
+    {"id": "new_high", "label": "New High", "predefined": None, "source": "finviz", "signal": "New High"},
     {"id": "most_actives", "label": "Most Actives", "predefined": "most_actives"},
     {"id": "most_shorted", "label": "Most Shorted", "predefined": "most_shorted_stocks"},
     {"id": "undervalued_large", "label": "Undervalued Large Caps", "predefined": "undervalued_large_caps"},
@@ -89,8 +90,21 @@ def calculate_ma(closes: list[float], window: int) -> list[float | None]:
 # ---------------------------------------------------------------------------
 
 
+def get_finviz_tickers(signal: str, limit: int = 10) -> list[str]:
+    """Get tickers from Finviz screener using a given signal."""
+    screener = Overview()
+    screener.set_filter(signal=signal)
+    df = screener.screener_view()
+    if df is None or df.empty:
+        return []
+    return df["Ticker"].tolist()[:limit]
+
+
 def get_tickers_for_tab(tab: dict) -> list[str]:
     """Get up to 10 tickers for a given tab."""
+    if tab.get("source") == "finviz":
+        return get_finviz_tickers(tab["signal"])
+
     if tab["predefined"] is None:
         q = yf.EquityQuery(
             "and",
@@ -302,7 +316,8 @@ def fetch_all_data(cached_data: dict | None = None) -> tuple[dict, dict]:
                         print(f"  -> Using cached data for {ticker}")
                         break
 
-        stocks.sort(key=lambda s: s["marketCap"], reverse=True)
+        if tab.get("source") != "finviz":
+            stocks.sort(key=lambda s: s["marketCap"], reverse=True)
         all_data[tab["id"]] = stocks
         cache_out[tab["id"]] = {"tickers": tickers, "stocks": stocks}
 

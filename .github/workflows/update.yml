@@ -41,6 +41,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Fetch data and build site
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python fetch_and_build.py
 
       - name: Upload Pages artifact
