@@ -91,12 +91,13 @@ def calculate_ma(closes: list[float], window: int) -> list[float | None]:
 
 
 def get_finviz_tickers(signal: str, limit: int = 10) -> list[str]:
-    """Get tickers from Finviz screener using a given signal."""
+    """Get top tickers by market cap from Finviz screener for a given signal."""
     screener = Overview()
     screener.set_filter(signal=signal)
     df = screener.screener_view()
     if df is None or df.empty:
         return []
+    df = df.sort_values("Market Cap", ascending=False)
     return df["Ticker"].tolist()[:limit]
 
 
@@ -316,8 +317,7 @@ def fetch_all_data(cached_data: dict | None = None) -> tuple[dict, dict]:
                         print(f"  -> Using cached data for {ticker}")
                         break
 
-        if tab.get("source") != "finviz":
-            stocks.sort(key=lambda s: s["marketCap"], reverse=True)
+        stocks.sort(key=lambda s: s["marketCap"], reverse=True)
         all_data[tab["id"]] = stocks
         cache_out[tab["id"]] = {"tickers": tickers, "stocks": stocks}
 
