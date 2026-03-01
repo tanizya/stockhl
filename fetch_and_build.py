@@ -43,6 +43,7 @@ TABS = [
     {"id": "new_high", "label": "New High", "predefined": None, "source": "finviz", "signal": "New High"},
     {"id": "double_top", "label": "Double Top", "predefined": None, "source": "finviz", "signal": "Double Top"},
     {"id": "head_shoulders", "label": "Head & Shoulders", "predefined": None, "source": "finviz", "signal": "Head & Shoulders"},
+    {"id": "upgrades", "label": "Upgrades", "predefined": None, "source": "finviz", "signal": "Upgrades"},
     {"id": "most_actives", "label": "Most Actives", "predefined": "most_actives"},
     {"id": "most_shorted", "label": "Most Shorted", "predefined": "most_shorted_stocks"},
     {"id": "undervalued_large", "label": "Undervalued Large Caps", "predefined": "undervalued_large_caps"},
