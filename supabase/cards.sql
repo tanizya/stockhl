@@ -15,6 +15,7 @@ CREATE TABLE cards (
   forward_dividend_yield double precision,
   target_mean_price      double precision,
   periods    jsonb NOT NULL DEFAULT '{}'::jsonb,
+  signal_overlay jsonb,
   reference_date date NOT NULL,
   sort_order int NOT NULL DEFAULT 0,
   updated_at timestamptz NOT NULL DEFAULT now(),

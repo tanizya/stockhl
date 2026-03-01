@@ -42,6 +42,7 @@ TABS = [
     {"id": "market_cap", "label": "Market Cap Top 10", "predefined": None},
     {"id": "new_high", "label": "New High", "predefined": None, "source": "finviz", "signal": "New High"},
     {"id": "double_top", "label": "Double Top", "predefined": None, "source": "finviz", "signal": "Double Top"},
+    {"id": "head_shoulders", "label": "Head & Shoulders", "predefined": None, "source": "finviz", "signal": "Head & Shoulders"},
     {"id": "most_actives", "label": "Most Actives", "predefined": "most_actives"},
     {"id": "most_shorted", "label": "Most Shorted", "predefined": "most_shorted_stocks"},
     {"id": "undervalued_large", "label": "Undervalued Large Caps", "predefined": "undervalued_large_caps"},
@@ -84,6 +85,140 @@ def calculate_ma(closes: list[float], window: int) -> list[float | None]:
             avg = sum(closes[i - window + 1 : i + 1]) / window
             result.append(round(avg, 2))
     return result
+
+
+# ---------------------------------------------------------------------------
+# Signal detection
+# ---------------------------------------------------------------------------
+
+
+def detect_double_top(candles: list[dict], window: int = 5) -> dict | None:
+    """Find the two highest local peaks in daily candles and the neckline between them.
+
+    Finviz already identifies the stock as Double Top, so we just locate the
+    two highest peaks and the valley between them for chart annotation.
+    Returns {"markers": [...], "lines": [...]} or None if insufficient data.
+    """
+    if len(candles) < window * 2 + 1:
+        return None
+
+    highs = [c["high"] for c in candles]
+
+    # Find local peaks: high >= all neighbours within window
+    peaks = []
+    for i in range(window, len(highs) - window):
+        if all(highs[i] >= highs[j] for j in range(i - window, i + window + 1) if j != i):
+            peaks.append((i, highs[i]))
+
+    if len(peaks) < 2:
+        # Fallback: just pick the two bars with the highest highs
+        indexed = sorted(enumerate(highs), key=lambda x: x[1], reverse=True)
+        top1 = indexed[0]
+        # Pick next highest that is at least `window` bars away
+        top2 = None
+        for idx, val in indexed[1:]:
+            if abs(idx - top1[0]) >= window:
+                top2 = (idx, val)
+                break
+        if top2 is None:
+            return None
+        peaks = [top1, top2]
+    else:
+        # Sort by price descending and pick the two highest
+        peaks.sort(key=lambda p: p[1], reverse=True)
+        # Ensure separation: pick top1, then find next highest separated by window
+        top1 = peaks[0]
+        top2 = None
+        for p in peaks[1:]:
+            if abs(p[0] - top1[0]) >= window:
+                top2 = p
+                break
+        if top2 is None:
+            return None
+        peaks = [top1, top2]
+
+    top1, top2 = peaks[0], peaks[1]
+
+    # Neckline: lowest low between the two peaks
+    lo, hi = sorted([top1[0], top2[0]])
+    neckline = min(c["low"] for c in candles[lo : hi + 1])
+
+    # Order chronologically for markers
+    first, second = (top1, top2) if top1[0] < top2[0] else (top2, top1)
+
+    return {
+        "markers": [
+            {"time": candles[first[0]]["time"], "price": round(first[1], 2), "label": "Top 1"},
+            {"time": candles[second[0]]["time"], "price": round(second[1], 2), "label": "Top 2"},
+        ],
+        "lines": [
+            {"price": round(neckline, 2), "label": "Neckline"},
+        ],
+    }
+
+
+def detect_head_and_shoulders(candles: list[dict], window: int = 5) -> dict | None:
+    """Find Head & Shoulders pattern: three peaks where the middle is highest.
+
+    Returns markers for left shoulder, head, right shoulder + neckline,
+    or None if insufficient data.
+    """
+    if len(candles) < window * 2 + 1:
+        return None
+
+    highs = [c["high"] for c in candles]
+
+    # Find local peaks
+    peaks = []
+    for i in range(window, len(highs) - window):
+        if all(highs[i] >= highs[j] for j in range(i - window, i + window + 1) if j != i):
+            peaks.append((i, highs[i]))
+
+    if len(peaks) < 3:
+        # Fallback: top 3 highs separated by window
+        indexed = sorted(enumerate(highs), key=lambda x: x[1], reverse=True)
+        selected = []
+        for idx, val in indexed:
+            if all(abs(idx - s[0]) >= window for s in selected):
+                selected.append((idx, val))
+                if len(selected) == 3:
+                    break
+        if len(selected) < 3:
+            return None
+        peaks = selected
+
+    # Sort peaks by price descending; head is the highest
+    peaks_sorted = sorted(peaks, key=lambda p: p[1], reverse=True)
+    head = peaks_sorted[0]
+
+    # Shoulders: two highest peaks that are on either side of the head
+    left_candidates = sorted([p for p in peaks_sorted[1:] if p[0] < head[0]], key=lambda p: p[1], reverse=True)
+    right_candidates = sorted([p for p in peaks_sorted[1:] if p[0] > head[0]], key=lambda p: p[1], reverse=True)
+
+    if not left_candidates or not right_candidates:
+        return None
+
+    left_shoulder = left_candidates[0]
+    right_shoulder = right_candidates[0]
+
+    # Neckline: average of the two valleys (between LS-Head and Head-RS)
+    valley1 = min(c["low"] for c in candles[left_shoulder[0] : head[0] + 1])
+    valley2 = min(c["low"] for c in candles[head[0] : right_shoulder[0] + 1])
+    neckline = (valley1 + valley2) / 2
+
+    # Order chronologically
+    pts = sorted([left_shoulder, head, right_shoulder], key=lambda p: p[0])
+
+    return {
+        "markers": [
+            {"time": candles[pts[0][0]]["time"], "price": round(pts[0][1], 2), "label": "LS"},
+            {"time": candles[pts[1][0]]["time"], "price": round(pts[1][1], 2), "label": "Head"},
+            {"time": candles[pts[2][0]]["time"], "price": round(pts[2][1], 2), "label": "RS"},
+        ],
+        "lines": [
+            {"price": round(neckline, 2), "label": "Neckline"},
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -304,6 +439,16 @@ def fetch_all_data(cached_data: dict | None = None) -> tuple[dict, dict]:
             print(f"  [{i + 1}/{len(tickers)}] {ticker}...", end=" ", flush=True)
             try:
                 data = fetch_stock_data(ticker)
+                # Detect signal overlay for applicable tabs
+                if tab["id"] in ("double_top", "head_shoulders"):
+                    candles_3m = data["periods"].get("3M", {}).get("candles", [])
+                    if tab["id"] == "double_top":
+                        overlay = detect_double_top(candles_3m)
+                    else:
+                        overlay = detect_head_and_shoulders(candles_3m)
+                    data["signalOverlay"] = overlay
+                    if overlay:
+                        print(f"[signal detected] ", end="")
                 stocks.append(data)
                 p1m = data["periods"].get("1M", {})
                 candles = p1m.get("candles", [])
@@ -392,6 +537,7 @@ def upsert_cards(all_data: dict, reference_date: str):
                 "forward_dividend_yield": stock.get("forwardDividendYield"),
                 "target_mean_price": stock.get("targetMeanPrice"),
                 "periods": stock.get("periods", {}),
+                "signal_overlay": stock.get("signalOverlay"),
                 "reference_date": reference_date,
                 "sort_order": i,
             })
