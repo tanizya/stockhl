@@ -3,3 +3,4 @@ __pycache__/
 .claude/
 data_cache.json
 _site/
+.env

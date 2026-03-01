@@ -17,10 +17,21 @@ Features:
 import json
 import os
 import struct
+import urllib.request
 import zlib
 from datetime import datetime, timezone
+from pathlib import Path
 
 import yfinance as yf
+
+# Load .env file if present (for local runs)
+_env_path = Path(__file__).resolve().parent / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -208,6 +219,13 @@ def fetch_stock_data(ticker_symbol: str) -> dict:
         "ticker": ticker_symbol,
         "name": name,
         "marketCap": market_cap,
+        "beta": info.get("beta"),
+        "trailingPE": info.get("trailingPE"),
+        "trailingEps": info.get("trailingEps"),
+        "earningsDate": info.get("earningsTimestampStart"),
+        "forwardDividendRate": info.get("dividendRate"),
+        "forwardDividendYield": info.get("dividendYield"),
+        "targetMeanPrice": info.get("targetMeanPrice"),
         "periods": periods,
     }
 
@@ -289,6 +307,86 @@ def fetch_all_data(cached_data: dict | None = None) -> tuple[dict, dict]:
         cache_out[tab["id"]] = {"tickers": tickers, "stocks": stocks}
 
     return all_data, cache_out
+
+
+# ---------------------------------------------------------------------------
+# Supabase upsert
+# ---------------------------------------------------------------------------
+
+
+def get_reference_date() -> str:
+    """Return today's date in US/Eastern as YYYY-MM-DD (market close date)."""
+    from datetime import timedelta
+
+    utcnow = datetime.now(timezone.utc)
+    # ET = UTC-5 (EST) or UTC-4 (EDT). Use a simple offset; the Action
+    # runs at 17:00 ET so the date is the same regardless of DST.
+    et = utcnow - timedelta(hours=5)
+    return et.strftime("%Y-%m-%d")
+
+
+def upsert_cards(all_data: dict, reference_date: str):
+    """Upload card rows to Supabase via REST API (DELETE+INSERT per tab).
+
+    Requires env vars SUPABASE_URL and SUPABASE_SERVICE_KEY.
+    Silently skips if they are not set.
+    """
+    base_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not base_url or not service_key:
+        print("\n[Supabase] SUPABASE_URL / SUPABASE_SERVICE_KEY not set – skipping upsert")
+        return
+
+    endpoint = f"{base_url}/rest/v1/cards"
+    headers = {
+        "apikey": service_key,
+        "Authorization": f"Bearer {service_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+    for tab in TABS:
+        tab_id = tab["id"]
+        stocks = all_data.get(tab_id, [])
+        if not stocks:
+            continue
+
+        # 1) DELETE existing rows for this tab
+        del_url = f"{endpoint}?tab=eq.{tab_id}"
+        req = urllib.request.Request(del_url, method="DELETE", headers=headers)
+        try:
+            urllib.request.urlopen(req)
+        except Exception as e:
+            print(f"  [Supabase] DELETE {tab_id} failed: {e}")
+            continue
+
+        # 2) INSERT new rows
+        rows = []
+        for i, stock in enumerate(stocks):
+            rows.append({
+                "tab": tab_id,
+                "ticker": stock["ticker"],
+                "name": stock["name"],
+                "market_cap": stock["marketCap"],
+                "beta": stock.get("beta"),
+                "trailing_pe": stock.get("trailingPE"),
+                "trailing_eps": stock.get("trailingEps"),
+                "earnings_date": stock.get("earningsDate"),
+                "forward_dividend_rate": stock.get("forwardDividendRate"),
+                "forward_dividend_yield": stock.get("forwardDividendYield"),
+                "target_mean_price": stock.get("targetMeanPrice"),
+                "periods": stock.get("periods", {}),
+                "reference_date": reference_date,
+                "sort_order": i,
+            })
+
+        body = json.dumps(rows, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(endpoint, data=body, headers=headers, method="POST")
+        try:
+            urllib.request.urlopen(req)
+            print(f"  [Supabase] {tab_id}: inserted {len(rows)} rows")
+        except Exception as e:
+            print(f"  [Supabase] INSERT {tab_id} failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -818,6 +916,10 @@ def main():
     # Save cache
     save_cache(cache_out)
 
+    # Upsert to Supabase
+    reference_date = get_reference_date()
+    upsert_cards(all_data, reference_date)
+
     # Build HTML (all features)
     html = build_html(all_data, TABS, timestamp)
     html_path = os.path.join(SITE_DIR, "index.html")
@@ -835,6 +937,13 @@ def main():
     write_manifest(SITE_DIR)
     write_service_worker(SITE_DIR, timestamp.replace(" ", "-").replace(":", ""))
     write_icons(SITE_DIR)
+
+    # Copy static pages (privacy policy, etc.)
+    for static_file in ["privacy.html"]:
+        src = os.path.join(os.path.dirname(__file__), static_file)
+        if os.path.exists(src):
+            import shutil
+            shutil.copy2(src, os.path.join(SITE_DIR, static_file))
 
     print(f"\nDone! Generated {SITE_DIR}/ with {len(TABS)} tabs. ({timestamp})")
 
